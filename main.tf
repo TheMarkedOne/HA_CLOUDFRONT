@@ -29,7 +29,7 @@ module "lambda" {
   region = var.region
 }
 
-# module "cloudfront" {
-#   source = "./modules/cloudfront" 
+module "cloudfront" {
+  source = "./modules/cloudfront" 
 
-#   }
+  }

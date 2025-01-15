@@ -3,55 +3,75 @@ resource "aws_s3_bucket" "my_bucket" {
   force_destroy = true
 }
 
-resource "aws_s3_bucket_public_access_block" "public_access_block" {
-  bucket                  = aws_s3_bucket.my_bucket.id
-  block_public_acls       = false
-  block_public_policy     = false
-  ignore_public_acls      = false
-  restrict_public_buckets = false
+resource "aws_cloudfront_origin_access_identity" "oai" {
+  comment = "OAI for S3 bucket access"
 }
 
 resource "aws_s3_bucket_policy" "my_bucket_policy" {
   bucket = aws_s3_bucket.my_bucket.id
 
-  policy = <<-POLICY
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Sid": "PublicReadGetObject",
-      "Effect": "Allow",
-      "Principal": "*",
-      "Action": [
-        "s3:GetObject"
-      ],
-      "Resource": "arn:aws:s3:::${aws_s3_bucket.my_bucket.id}/*"
-    }
-  ]
-}
-POLICY
+  policy = jsonencode({
+    Version   = "2012-10-17",
+    Statement = [
+      {
+        Sid       = "AllowCloudFrontAccess",
+        Effect    = "Allow",
+        Principal = {
+          CanonicalUser = aws_cloudfront_origin_access_identity.oai.s3_canonical_user_id
+        },
+        Action    = "s3:GetObject",
+        Resource  = "${aws_s3_bucket.my_bucket.arn}/*"
+      }
+    ]
+  })
 }
 
-# Uploading HTML file to S3 with dynamic CloudFront domain
-resource "aws_s3_bucket_object" "index_html" {
+resource "aws_s3_object" "index_html" {
   bucket = aws_s3_bucket.my_bucket.id
   key    = "index.html"
-  content = data.template_file.index_html.rendered
-  acl    = "public-read"
+  content = <<-EOT
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>My S3 & CloudFront Test Page</title>
+  </head>
+  <body>
+    <h1>Welcome to My Test Page</h1>
+    <p>
+      This is a simple HTML page linked to an image hosted on S3 and served via
+      CloudFront.
+    </p>
+    <p>
+      Below is the image that was uploaded to my S3 bucket, and it's being
+      served through CloudFront:
+    </p>
+    <img src="https://${aws_cloudfront_distribution.cdn.domain_name}/image.jpg" alt="Test Image" />
+
+    <p>
+      Feel free to explore other content linked to my CloudFront distribution!
+    </p>
+  </body>
+</html>
+EOT
+content_type = "text/html"
 }
 
-# Uploading image file to S3
-resource "aws_s3_bucket_object" "image" {
+resource "aws_s3_object" "image" {
   bucket = aws_s3_bucket.my_bucket.id
   key    = "image.jpg"
-  source = "./image.jpg"
+  source = "${path.module}/image.jpg"
 }
 
-# CloudFront Distribution
 resource "aws_cloudfront_distribution" "cdn" {
   origin {
     domain_name = aws_s3_bucket.my_bucket.bucket_regional_domain_name
     origin_id   = aws_s3_bucket.my_bucket.id
+
+    s3_origin_config {
+      origin_access_identity = aws_cloudfront_origin_access_identity.oai.cloudfront_access_identity_path
+    }
   }
 
   default_cache_behavior {
